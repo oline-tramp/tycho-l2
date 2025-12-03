@@ -1,3 +1,5 @@
+use std::net::SocketAddr;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
@@ -10,98 +12,123 @@ use serde::{Deserialize, Serialize};
 use tycho_block_util::archive::ArchiveData;
 use tycho_block_util::block::BlockStuff;
 use tycho_core::block_strider::{
-    ArchiveBlockProvider, BlockProviderExt, BlockSubscriber, BlockSubscriberContext,
-    BlockchainBlockProvider, ColdBootType, StorageBlockProvider,
+    BlockProviderExt, BlockSubscriber, BlockSubscriberContext, BlockSubscriberExt, ColdBootType,
+    GcSubscriber, MetricsSubscriber,
 };
+use tycho_core::blockchain_rpc::NoopBroadcastListener;
+use tycho_core::global_config::GlobalConfig;
+use tycho_core::node::{NodeBase, NodeBaseConfig, NodeBootArgs, NodeKeys};
 use tycho_core::storage::{BlockConnection, BlockHandle, CoreStorage, NewBlockMeta};
 use tycho_types::dict::Dict;
 use tycho_types::models::BlockId;
-use tycho_util::cli::signal;
+use tycho_util::cli;
+use tycho_util::cli::config::ThreadPoolConfig;
+use tycho_util::cli::logger::LoggerConfig;
+use tycho_util::cli::metrics::MetricsConfig;
+use tycho_util::config::PartialConfig;
 use tycho_util::futures::JoinTask;
+use tycho_util::serde_helpers::{load_json_from_file, save_json_to_file};
 
+/// Run the Tycho node.
 #[derive(Parser)]
 pub struct Cmd {
-    #[clap(flatten)]
-    pub base: tycho_light_node::CmdRun,
+    /// dump the node config template
+    #[clap(
+        short = 'i',
+        long,
+        conflicts_with_all = ["config", "global_config", "keys", "logger_config", "import_zerostate", "cold_boot"]
+    )]
+    pub init_config: Option<PathBuf>,
+
+    #[clap(
+        long,
+        short,
+        conflicts_with_all = ["config", "global_config", "keys", "logger_config", "import_zerostate", "cold_boot"]
+    )]
+    pub all: bool,
+
+    /// overwrite the existing config
+    #[clap(short, long)]
+    pub force: bool,
+
+    /// path to the node config
+    #[clap(long, required_unless_present = "init_config")]
+    pub config: Option<PathBuf>,
+
+    /// path to the global config
+    #[clap(long, required_unless_present = "init_config")]
+    pub global_config: Option<PathBuf>,
+
+    /// path to node keys
+    #[clap(long, required_unless_present = "init_config")]
+    pub keys: Option<PathBuf>,
+
+    /// path to the logger config
+    #[clap(long)]
+    pub logger_config: Option<PathBuf>,
+
+    /// list of zerostate files to import
+    #[clap(long)]
+    pub import_zerostate: Option<Vec<PathBuf>>,
+
+    /// Overwrite cold boot type. Default: `latest-persistent`
+    #[clap(long)]
+    pub cold_boot: Option<ColdBootType>,
 }
 
 impl Cmd {
     pub fn run(self) -> Result<()> {
-        std::panic::set_hook(Box::new(|info| {
-            use std::io::Write;
-            let backtrace = std::backtrace::Backtrace::capture();
-
-            tracing::error!("{info}\n{backtrace}");
-            std::io::stderr().flush().ok();
-            std::io::stdout().flush().ok();
-            std::process::exit(1);
-        }));
-
-        if let Some(config_path) = self.base.init_config {
-            if config_path.exists() && !self.base.force {
+        if let Some(config_path) = self.init_config {
+            if config_path.exists() && !self.force {
                 anyhow::bail!("config file already exists, use --force to overwrite");
             }
 
-            let config = NodeConfig {
-                rpc: None,
-                ..Default::default()
+            let config = NodeConfig::default();
+            return if self.all {
+                save_json_to_file(config, config_path)
+            } else {
+                save_json_to_file(config.into_partial(), config_path)
             };
-
-            std::fs::write(config_path, serde_json::to_string_pretty(&config).unwrap())?;
-            return Ok(());
         }
 
-        let mut node_config =
-            NodeConfig::from_file(self.base.config.as_ref().context("no config")?)
+        let node_config: NodeConfig =
+            load_json_from_file(self.config.as_ref().context("no config")?)
                 .context("failed to load node config")?;
 
-        // Always disable RPC by default.
-        // TODO: Remove from light nodes.
-        node_config.rpc = None;
+        cli::logger::init_logger(&node_config.logger_config, self.logger_config.clone())?;
+        cli::logger::set_abort_with_tracing();
 
-        tycho_util::cli::logger::init_logger(
-            &node_config.logger_config,
-            self.base.logger_config.clone(),
-        )?;
-
-        rayon::ThreadPoolBuilder::new()
-            .stack_size(8 * 1024 * 1024)
-            .thread_name(|_| "rayon_worker".to_string())
-            .num_threads(node_config.threads.rayon_threads)
-            .build_global()
-            .unwrap();
-
-        tokio::runtime::Builder::new_multi_thread()
-            .enable_all()
-            .worker_threads(node_config.threads.tokio_workers)
-            .build()?
-            .block_on(async move {
-                let run_fut = tokio::spawn(self.run_impl(node_config));
-                let stop_fut = signal::any_signal(signal::TERMINATION_SIGNALS);
-                tokio::select! {
-                    res = run_fut => res.unwrap(),
-                    signal = stop_fut => match signal {
-                        Ok(signal) => {
-                            tracing::info!(?signal, "received termination signal");
-                            Ok(())
-                        }
-                        Err(e) => Err(e.into()),
-                    }
-                }
-            })
+        node_config.threads.init_reclaimer().unwrap();
+        node_config.threads.init_global_rayon_pool().unwrap();
+        node_config
+            .threads
+            .build_tokio_runtime()?
+            .block_on(cli::signal::run_or_terminate(self.run_impl(node_config)))
     }
 
     async fn run_impl(self, node_config: NodeConfig) -> Result<()> {
-        let import_zerostate = self.base.import_zerostate.clone();
+        if let Some(metrics) = &node_config.metrics {
+            tycho_util::cli::metrics::init_metrics(metrics)?;
+        }
 
         // Build node.
-        let mut node = self.base.create(node_config.clone()).await?;
-        tracing::info!("created tycho node");
+        let keys = NodeKeys::load_or_create(self.keys.unwrap())?;
+        let global_config = GlobalConfig::from_file(self.global_config.unwrap())
+            .context("failed to load global config")?;
+        let public_ip = cli::resolve_public_ip(node_config.base.public_ip).await?;
+        let public_addr = SocketAddr::new(public_ip, node_config.base.port);
+
+        let node = NodeBase::builder(&node_config.base, &global_config)
+            .init_network(public_addr, &keys.as_secret())?
+            .init_storage()
+            .await?
+            .init_blockchain_rpc(NoopBroadcastListener, NoopBroadcastListener)?
+            .build()?;
 
         // Open proofs storage.
         let proofs = ProofStorage::new(
-            node.storage().context().root_dir(),
-            node_config.user_config.proof_storage,
+            node.core_storage.context().root_dir(),
+            node_config.proof_storage,
         )
         .await
         .context("failed to create proof storage")?;
@@ -109,55 +136,66 @@ impl Cmd {
 
         // Bind API.
         let api = Api::bind(
-            node_config.user_config.api.listen_addr,
-            proof_api_l2::api::build_api(&node_config.user_config.api, proofs.clone()),
+            node_config.api.listen_addr,
+            proof_api_l2::api::build_api(&node_config.api, proofs.clone()),
         )
         .await
         .context("failed to bind API service")?;
         tracing::info!("created api");
 
-        // Prepare block providers.
-        let archive_block_provider = ArchiveBlockProvider::new(
-            node.blockchain_rpc_client().clone(),
-            node.storage().clone(),
-            node_config.archive_block_provider.clone(),
-        );
-
-        let storage_block_provider = StorageBlockProvider::new(node.storage().clone());
-
-        let blockchain_block_provider = BlockchainBlockProvider::new(
-            node.blockchain_rpc_client().clone(),
-            node.storage().clone(),
-            node_config.blockchain_block_provider.clone(),
-        )
-        .with_fallback(archive_block_provider.clone());
-
         // Sync node.
+        node.wait_for_neighbours(3).await;
+
+        let boot_type = self.cold_boot.unwrap_or(ColdBootType::LatestPersistent);
         let init_block_id = node
-            .init(ColdBootType::LatestPersistent, import_zerostate)
+            .boot_ext(NodeBootArgs {
+                boot_type,
+                zerostates: self.import_zerostate,
+                queue_state_handler: None,
+                ignore_states: true,
+            })
             .await?;
+        tracing::info!(%init_block_id, "node initialized");
 
         // Init proofs storage.
         proofs
-            .init(node.storage(), &init_block_id)
+            .init(&node.core_storage, &init_block_id)
             .await
             .context("failed to init proofs storage")?;
 
         // Start API
         let api_fut = JoinTask::new(api.serve());
 
-        // Start the node.
-        node.run(
-            archive_block_provider.chain((blockchain_block_provider, storage_block_provider)),
-            LightSubscriber {
-                storage: node.storage().clone(),
-                proofs,
-            },
-        )
-        .await?;
+        // Build strider.
+        let archive_block_provider = node.build_archive_block_provider();
+        let storage_block_provider = node.build_storage_block_provider();
+        let blockchain_block_provider = node
+            .build_blockchain_block_provider()
+            .with_fallback(archive_block_provider.clone());
 
-        // Serve API for the reset of the lifetime
-        api_fut.await.map_err(Into::into)
+        let gc_subscriber = GcSubscriber::new(node.core_storage.clone());
+        let block_strider = node.build_strider(
+            archive_block_provider.chain((blockchain_block_provider, storage_block_provider)),
+            (
+                LightSubscriber {
+                    storage: node.core_storage.clone(),
+                    proofs,
+                },
+                MetricsSubscriber,
+            )
+                .chain(gc_subscriber),
+        );
+
+        // Run block strider
+        tracing::info!("block strider started");
+        tokio::select! {
+            res = block_strider.run() => res?,
+            res = api_fut => res?
+        }
+        tracing::info!("block strider finished");
+
+        // Done
+        Ok(())
     }
 }
 
@@ -324,11 +362,20 @@ impl BlockSubscriber for LightSubscriber {
     }
 }
 
-type NodeConfig = tycho_light_node::NodeConfig<NodeConfigExtra>;
-
-#[derive(Default, Debug, Clone, Serialize, Deserialize)]
+#[derive(Default, Debug, Clone, Serialize, Deserialize, PartialConfig)]
 #[serde(default)]
-struct NodeConfigExtra {
-    pub api: ApiConfig,
-    pub proof_storage: ProofStorageConfig,
+struct NodeConfig {
+    #[partial]
+    #[serde(flatten)]
+    base: NodeBaseConfig,
+    #[important]
+    threads: ThreadPoolConfig,
+    #[important]
+    logger_config: LoggerConfig,
+    #[important]
+    metrics: Option<MetricsConfig>,
+    #[important]
+    api: ApiConfig,
+    #[important]
+    proof_storage: ProofStorageConfig,
 }
