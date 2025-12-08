@@ -83,7 +83,10 @@ pub fn build_api(config: &ApiConfig, client: TonClient) -> Router {
             ServiceBuilder::new()
                 .layer(DefaultBodyLimit::max(32))
                 .layer(CorsLayer::permissive())
-                .layer(TimeoutLayer::new(Duration::from_secs(10))),
+                .layer(TimeoutLayer::with_status_code(
+                    StatusCode::REQUEST_TIMEOUT,
+                    Duration::from_secs(10),
+                )),
         );
 
     let quota = Quota::per_second(config.rate_limit).allow_burst(config.rate_limit);

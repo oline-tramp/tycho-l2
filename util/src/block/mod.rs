@@ -9,9 +9,11 @@ use tycho_types::models::{
 use tycho_types::num::Tokens;
 use tycho_types::prelude::*;
 
+pub use self::legacy::LegacyModels;
 pub use self::ton::TonModels;
 pub use self::tycho::TychoModels;
 
+pub mod legacy;
 pub mod ton;
 pub mod tycho;
 

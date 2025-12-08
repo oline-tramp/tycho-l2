@@ -3,11 +3,10 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use clap::Parser;
-use proof_api_ton::api::ApiConfig;
-use proof_api_ton::client::TonClient;
+use proof_api_legacy::api::{ApiConfig, build_api};
+use proof_api_legacy::client::LegacyClient;
 use proof_api_util::api::Api;
 use serde::{Deserialize, Serialize};
-use ton_lite_client::{LiteClient, LiteClientConfig, TonGlobalConfig};
 use tycho_util::cli::logger::LoggerConfig;
 
 /// Run the API.
@@ -17,17 +16,13 @@ pub struct Cmd {
     #[clap(
         short = 'i',
         long,
-        conflicts_with_all = ["config", "global_config", "logger_config"]
+        conflicts_with_all = ["config", "logger_config"]
     )]
     pub init_config: Option<PathBuf>,
 
     /// overwrite the existing config
     #[clap(short, long)]
     pub force: bool,
-
-    // Path to the TON global config.
-    #[clap(long, required_unless_present = "init_config")]
-    pub global_config: Option<PathBuf>,
 
     /// path to the node config
     #[clap(long, required_unless_present = "init_config")]
@@ -55,14 +50,11 @@ impl Cmd {
         let config = Config::load_from_file(self.config.as_ref().context("no config")?)?;
         tycho_util::cli::logger::init_logger(&config.logger_config, self.logger_config)?;
 
-        let global_config = TonGlobalConfig::load_from_file(self.global_config.unwrap())?;
-        let lite_client = LiteClient::new(LiteClientConfig::default(), global_config.liteservers);
-        let client = TonClient::new(lite_client);
-
+        let client =
+            LegacyClient::new(config.client.url).context("failed to create legacy client")?;
         let api = Api::bind(
             config.api.listen_addr,
-            proof_api_ton::api::build_api(&config.api, client)
-                .into_make_service_with_connect_info::<SocketAddr>(),
+            build_api(&config.api, client).into_make_service_with_connect_info::<SocketAddr>(),
         )
         .await
         .context("failed to bind API service")?;
@@ -76,6 +68,7 @@ impl Cmd {
 #[serde(default)]
 struct Config {
     api: ApiConfig,
+    client: LegacyClientConfig,
     logger_config: LoggerConfig,
 }
 
@@ -83,5 +76,18 @@ impl Config {
     pub fn load_from_file<P: AsRef<Path>>(path: P) -> Result<Self> {
         let data = std::fs::read(path).context("failed to read config")?;
         serde_json::from_slice(&data).context("failed to deserialize config")
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct LegacyClientConfig {
+    url: String,
+}
+
+impl Default for LegacyClientConfig {
+    fn default() -> Self {
+        Self {
+            url: "http://localhost/graphql".to_owned(),
+        }
     }
 }

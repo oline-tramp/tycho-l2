@@ -1,0 +1,40 @@
+[package]
+name = "proof-api-legacy"
+description = "Transaction proof builder for legacy networks."
+include = ["src/**/*.rs", "./LICENSE-*", "./README.md"]
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+license.workspace = true
+
+[dependencies]
+aide = { workspace = true }
+anyhow = { workspace = true }
+axum = { workspace = true, features = ["tokio"] }
+clap = { workspace = true }
+governor = { workspace = true }
+reqwest = { workspace = true, features = ["http2", "json", "rustls-tls"] }
+schemars = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync", "time"] }
+tower = { workspace = true }
+tower-http = { workspace = true, features = ["timeout", "cors"] }
+tracing = { workspace = true }
+tycho-types = { workspace = true, features = ["sync"] }
+
+tikv-jemallocator = { workspace = true, features = [
+    "unprefixed_malloc_on_supported_platforms",
+    "background_threads",
+] }
+
+proof-api-util = { workspace = true, features = ["api"] }
+tycho-util = { workspace = true, features = ["cli"] }
+
+[build-dependencies]
+anyhow = { workspace = true }
+
+[lints]
+workspace = true

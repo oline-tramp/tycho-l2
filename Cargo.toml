@@ -8,7 +8,14 @@ license = "MIT OR Apache-2.0"
 
 [workspace]
 resolver = "2"
-members = ["sync-service", "proof-api-l2", "proof-api-ton", "ton-lite-client", "util"]
+members = [
+    "proof-api-l2",
+    "proof-api-legacy",
+    "proof-api-ton",
+    "sync-service",
+    "ton-lite-client",
+    "util",
+]
 
 [workspace.dependencies]
 aes = "0.8"
@@ -59,7 +66,6 @@ tikv-jemallocator = { version = "0.6.0", features = [
 
 tycho-block-util = { git = "https://github.com/broxus/tycho.git", rev = "f541531d0b38d21922cbb01ac372432459277959" }
 tycho-core = { git = "https://github.com/broxus/tycho.git", rev = "f541531d0b38d21922cbb01ac372432459277959" }
-tycho-light-node = { git = "https://github.com/broxus/tycho.git", rev = "f541531d0b38d21922cbb01ac372432459277959" }
 tycho-storage = { git = "https://github.com/broxus/tycho.git", rev = "f541531d0b38d21922cbb01ac372432459277959" }
 tycho-util = { git = "https://github.com/broxus/tycho.git", rev = "f541531d0b38d21922cbb01ac372432459277959" }
 
