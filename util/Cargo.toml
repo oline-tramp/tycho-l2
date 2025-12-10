@@ -25,6 +25,7 @@ tower-service = { workspace = true, optional = true }
 tracing = { workspace = true, optional = true }
 tycho-crypto = { workspace = true, features = ["tl-proto"] }
 tycho-types = { workspace = true, features = ["models", "base64", "serde"] }
+tycho-util = { workspace = true }
 
 [dev-dependencies]
 tycho-types = { workspace = true, features = ["models", "base64"] }

@@ -56,3 +56,30 @@ pub mod ton_address {
         StdAddrBase64Repr::<true>::serialize(addr, serializer)
     }
 }
+
+pub mod gql_shard_prefix {
+    use serde::de::Error;
+    use tycho_util::serde_helpers::BorrowedStr;
+
+    use super::*;
+
+    pub fn deserialize<'de, D: serde::de::Deserializer<'de>>(d: D) -> Result<u64, D::Error> {
+        let BorrowedStr(s) = <_>::deserialize(d)?;
+        u64::from_str_radix(s.as_ref(), 16).map_err(Error::custom)
+    }
+}
+
+pub mod gql_u64 {
+    use serde::de::Error;
+    use tycho_util::serde_helpers::BorrowedStr;
+
+    use super::*;
+
+    pub fn deserialize<'de, D: serde::de::Deserializer<'de>>(d: D) -> Result<u64, D::Error> {
+        let BorrowedStr(s) = <_>::deserialize(d)?;
+        let Some(hex) = s.as_ref().strip_prefix("0x") else {
+            return Err(Error::custom("expected hex prefix"));
+        };
+        u64::from_str_radix(hex, 16).map_err(Error::custom)
+    }
+}

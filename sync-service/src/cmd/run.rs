@@ -22,27 +22,25 @@ impl Cmd {
             let left_client = worker.left.client.build_client()?;
             let right_client = worker.right.client.build_client()?;
 
-            tracing::info!(
-                src = left_client.name(),
-                dst = right_client.name(),
-                "starting uploader",
-            );
-            let uploader = Uploader::new(
-                left_client.clone(),
-                right_client.clone(),
-                worker.right.uploader.clone(),
-            )
-            .await?;
-            uploaders.push(uploader);
+            if let Some(uploader) = worker.right.uploader.clone() {
+                tracing::info!(
+                    src = left_client.name(),
+                    dst = right_client.name(),
+                    "starting uploader",
+                );
+                let u = Uploader::new(left_client.clone(), right_client.clone(), uploader).await?;
+                uploaders.push(u);
+            }
 
-            tracing::info!(
-                src = right_client.name(),
-                dst = left_client.name(),
-                "starting uploader",
-            );
-            let uploader =
-                Uploader::new(right_client, left_client, worker.left.uploader.clone()).await?;
-            uploaders.push(uploader);
+            if let Some(uploader) = worker.left.uploader.clone() {
+                tracing::info!(
+                    src = right_client.name(),
+                    dst = left_client.name(),
+                    "starting uploader",
+                );
+                let u = Uploader::new(right_client, left_client, uploader).await?;
+                uploaders.push(u);
+            }
         }
         tracing::info!("all uploaders created");
 

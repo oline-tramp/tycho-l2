@@ -2017,6 +2017,7 @@ dependencies = [
  "tracing",
  "tycho-crypto",
  "tycho-types",
+ "tycho-util",
 ]
 
 [[package]]

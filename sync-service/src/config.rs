@@ -28,5 +28,5 @@ pub struct WorkerConfig {
 pub struct NetworkConfig {
     #[serde(flatten)]
     pub client: ClientConfig,
-    pub uploader: UploaderConfig,
+    pub uploader: Option<UploaderConfig>,
 }

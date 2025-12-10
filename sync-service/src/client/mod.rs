@@ -11,10 +11,12 @@ use tycho_types::models::{
 };
 use tycho_types::prelude::*;
 
+pub use self::legacy::LegacyClient;
 pub use self::ton::TonClient;
 pub use self::tycho::TychoClient;
 use crate::util::account::{AccountStateResponse, LastTransactionId};
 
+mod legacy;
 mod ton;
 mod tycho;
 
@@ -210,6 +212,7 @@ pub struct KeyBlockData {
 pub enum ClientConfig {
     Ton(TonClientConfig),
     Tycho(TychoClientConfig),
+    Legacy(LegacyClientConfig),
 }
 
 impl ClientConfig {
@@ -232,6 +235,11 @@ impl ClientConfig {
 
                 Arc::new(TychoClient::new(config.name.clone(), rpc))
             }
+            Self::Legacy(config) => Arc::new(
+                LegacyClient::new(config.name.clone(), &config.url).with_context(|| {
+                    format!("failed to create legacy client for {}", config.name)
+                })?,
+            ),
         })
     }
 }
@@ -250,4 +258,12 @@ pub struct TychoClientConfig {
     pub name: String,
     /// RPC URL.
     pub rpc: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct LegacyClientConfig {
+    /// Network name.
+    pub name: String,
+    /// GraphQL URL.
+    pub url: String,
 }
