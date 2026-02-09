@@ -182,11 +182,11 @@ impl Wallet {
     ) -> Result<Lazy<Transaction>> {
         let this = self.inner.as_ref();
 
-        let signature_id = this
+        let signature_context = this
             .client
-            .get_signature_id()
+            .get_signature_context()
             .await
-            .context("failed to get signature id")?;
+            .context("failed to get signature context")?;
 
         let ttl = timeout.clamp(1, 60);
 
@@ -210,14 +210,19 @@ impl Wallet {
 
         let now_ms = now_millis();
         let expire_at = (now_ms / 1000) as u32 + ttl;
-        let body = methods::send_transaction()
-            .encode_external(&inputs)
-            .with_address(&this.address)
-            .with_time(now_ms)
-            .with_expire_at(expire_at)
-            .with_pubkey((*this.key).as_ref())
-            .build_input()?
-            .sign(&this.key, signature_id)?;
+        let body = {
+            let body = methods::send_transaction()
+                .encode_external(&inputs)
+                .with_address(&this.address)
+                .with_time(now_ms)
+                .with_expire_at(expire_at)
+                .with_pubkey((*this.key).as_ref())
+                .build_input()?;
+
+            // TODO: Move into tycho-types
+            let signature = signature_context.sign(&this.key, body.hash.as_slice());
+            body.with_signature(&signature)?
+        };
 
         let message_cell = CellBuilder::build_from(Message {
             info: MsgInfo::ExtIn(ExtInMsgInfo {

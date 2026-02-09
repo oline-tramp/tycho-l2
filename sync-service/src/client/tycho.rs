@@ -7,7 +7,7 @@ use proof_api_util::block::{
 use tycho_types::cell::Lazy;
 use tycho_types::merkle::MerkleProof;
 use tycho_types::models::{
-    BlockSignatures, BlockchainConfig, GlobalCapability, StdAddr, Transaction,
+    AutoSignatureContext, BlockSignatures, BlockchainConfig, StdAddr, Transaction,
 };
 use tycho_types::prelude::*;
 
@@ -35,13 +35,13 @@ impl NetworkClient for TychoClient {
         &self.name
     }
 
-    async fn get_signature_id(&self) -> Result<Option<i32>> {
+    async fn get_signature_context(&self) -> Result<AutoSignatureContext> {
         let current = self.rpc.get_latest_config().await?;
         let global = current.config.get_global_version()?;
-        Ok(global
-            .capabilities
-            .contains(GlobalCapability::CapSignatureWithId)
-            .then_some(current.global_id))
+        Ok(AutoSignatureContext {
+            global_id: current.global_id,
+            capabilities: global.capabilities,
+        })
     }
 
     async fn get_latest_key_block_seqno(&self) -> Result<u32> {

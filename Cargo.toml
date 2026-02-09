@@ -1,5 +1,5 @@
 [workspace.package]
-version = "0.3.1"
+version = "0.3.2"
 edition = "2024"
 authors = ["Broxus Team"]
 rust-version = "1.89.0"
@@ -64,16 +64,19 @@ tikv-jemallocator = { version = "0.6.0", features = [
     "background_threads",
 ] }
 
-tycho-block-util = { git = "https://github.com/broxus/tycho.git", rev = "f541531d0b38d21922cbb01ac372432459277959" }
-tycho-core = { git = "https://github.com/broxus/tycho.git", rev = "f541531d0b38d21922cbb01ac372432459277959" }
-tycho-storage = { git = "https://github.com/broxus/tycho.git", rev = "f541531d0b38d21922cbb01ac372432459277959" }
-tycho-util = { git = "https://github.com/broxus/tycho.git", rev = "f541531d0b38d21922cbb01ac372432459277959" }
+tycho-block-util = "0.3.6"
+tycho-core = "0.3.6"
+tycho-storage = "0.3.6"
+tycho-util = "0.3.6"
 
-tycho-vm = { git = "https://github.com/broxus/tycho-vm.git", rev = "56a7eb8e6854087881eb3ff269b4d8b8663458a5" }
+tycho-vm = "0.3.2"
 
 # local deps
 proof-api-util = { path = "./util" }
 ton-lite-client = { path = "./ton-lite-client" }
+
+[patch.crates-io]
+tycho-types = { git = "https://github.com/broxus/tycho-types.git", rev = "47a4e746d008904d3d02aae398139cc7e7e25765" }
 
 [workspace.lints.rust]
 future_incompatible = "warn"
@@ -89,7 +92,7 @@ dbg_macro = "warn"
 debug_assert_with_mut_call = "warn"
 disallowed_methods = "warn"
 doc_markdown = "warn"
-empty_enum = "warn"
+empty_enums = "warn"
 enum_glob_use = "warn"
 exit = "warn"
 expl_impl_clone_on_copy = "warn"
